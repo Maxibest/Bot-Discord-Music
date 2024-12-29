@@ -1,76 +1,69 @@
 require('dotenv').config();
-const fs = require('fs')
-const { Client, Collection } = require("discord.js");
+const fs = require('fs');
+const { Client, Collection, Partials } = require("discord.js");
 const { REST } = require('@discordjs/rest');
-const { Routes } = require('discord-api-types/v9');
+const { Routes } = require('discord-api-types/v10');
 
 const montoken = process.env.token;
-const commands = [];
-
 const clientId = process.env.CLIENT_ID;
-const guildId = process.env.GUILD_ID;
 
-const commandHandler = new Collection();
+const client = new Client({ intents: 3276799, partials: [Partials.Channel] });
+const rest = new REST({ version: '10' }).setToken(montoken);
 
-const client = new Client({ intents: 3276799 });
+// Chargement des commandes
+const commands = [];
+const commandMap = new Map();
 
-client.on('ready', () => {
-  console.log('Je suis ready 🎶')
+fs.readdirSync('./commands')
+  .filter(file => file.endsWith('.js'))
+  .forEach(file => {
+    const command = require(`./commands/${file}`);
+    if ('data' in command && 'execute' in command) {
+      commands.push(command.data.toJSON());
+      commandMap.set(command.data.name, command);
+    } else {
+      console.warn(`[WARNING] La commande ${file} manque de "data" ou "execute".`);
+    }
+  });
+
+client.on("ready", async () => {
+  console.log("Bot prêt !");
+  try {
+    console.log("Enregistrement des commandes slash...");
+    await rest.put(Routes.applicationCommands(clientId), { body: commands });
+    console.log("Commandes slash enregistrées !");
+  } catch (error) {
+    console.error("Erreur lors de l'enregistrement des commandes :", error);
+  }
 });
 
-//Commandes Handlers "variables"
-const rest = new REST({ version: '9' }).setToken(montoken);
+const commandes = [require("./commands/play")];
 
-const mesCommands = fs.readdirSync("./commands").filter(file => file.endsWith(".js"));
-for (const file of mesCommands) {
-  const commandName = file.split(".")[0]
-  const command = require(`./commands/${commandName}`)
-  commandHandler.set(commandName, command)
-  if ('data' in command && 'execute' in command) {
-    commands.push(command.data.toJSON());
-  } else {
-    console.log(`[WARNING] The command at ${command} is missing a required "data" or "execute" property.`);
-  }
-}
+commandes.forEach((command) => commandMap.set(command.data.name, command));
 
-(async () => {
-  try {
-    console.log(`Started refreshing ${commands.length} application (/) commands.`);
-
-    const data = await rest.put(
-      Routes.applicationGuildCommands(clientId, guildId),
-      { body: commands },
-    );
-
-    console.log(`Successfully reloaded ${data.length} application (/) commands.`);
-  } catch (error) {
-    console.error(error);
-  }
-})();
-
-
-const commandes = [
-  require('./commands/playing'),
-  require('./commands/stop'),
-  require('./commands/unpause'),
-  require('./commands/help')
-]
-
-const commandMap = new Map();
-commandes.forEach(command => commandMap.set(command.data.name, command));
-
-client.on('interactionCreate', async (execute) => {
+client.on("interactionCreate", async (execute) => {
   if (!execute.isCommand()) return;
 
-  const command = commandMap.get(execute.commandName)
-  if (!command) return
+  const command = commandMap.get(execute.commandName);
+  if (!command) return;
 
   try {
     await command.execute(execute);
   } catch (error) {
-    console.error(error)
-    await execute.reply({ content: 'une erreur s\' est produite' });
+    console.error(error);
+    await execute.editReply({ content: "une erreur s' est produite" });
   }
-})
+});
 
-client.login(process.env.token);
+client.on("messageCreate", async (message) => {
+  const greetings = ["salut", "bonjour", "coucou"];
+  if (greetings.includes(message.content.toLowerCase())) {
+    try {
+      await message.react("👋");
+    } catch (error) {
+      console.error(error);
+    }
+  }
+});
+
+client.login(montoken);
